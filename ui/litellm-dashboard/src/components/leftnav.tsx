@@ -623,6 +623,16 @@ const Sidebar: React.FC<SidebarProps> = ({ setPage, defaultSelectedKey, collapse
 
   const selectedMenuKey = findMenuItemKey(defaultSelectedKey);
 
+  const findParentKey = (page: string): string | null => {
+    for (const group of menuGroups) {
+      for (const item of group.items) {
+        if (item.children?.some((c) => c.page === page)) return item.key;
+      }
+    }
+    return null;
+  };
+  const parentKey = findParentKey(defaultSelectedKey);
+
   return (
     <Layout>
       <Sider
@@ -657,7 +667,7 @@ const Sidebar: React.FC<SidebarProps> = ({ setPage, defaultSelectedKey, collapse
           <Menu
             mode="inline"
             selectedKeys={[selectedMenuKey]}
-            defaultOpenKeys={[]}
+            defaultOpenKeys={parentKey ? [parentKey] : []}
             inlineCollapsed={collapsed}
             className="custom-sidebar-menu"
             style={{
