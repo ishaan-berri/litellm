@@ -1,6 +1,6 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ColumnDef } from "@tanstack/react-table";
-import { Button, Collapse, Space, Tag, Tooltip, Typography } from "antd";
+import { Button, Collapse, message, Space, Tag, Tooltip, Typography } from "antd";
 import {
   CheckOutlined,
   CloseOutlined,
@@ -678,6 +678,8 @@ const WorkflowRuns: React.FC<WorkflowRunsProps> = ({ accessToken }) => {
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
+  const detailAbortRef = useRef<AbortController | null>(null);
+
   const fetchRuns = useCallback(async () => {
     if (!accessToken) return;
     setLoadingRuns(true);
@@ -690,6 +692,7 @@ const WorkflowRuns: React.FC<WorkflowRunsProps> = ({ accessToken }) => {
       setRuns(data.runs ?? []);
     } catch (err) {
       console.error("workflow runs fetch failed:", err);
+      message.error("Failed to load workflow runs");
     } finally {
       setLoadingRuns(false);
     }
@@ -698,6 +701,11 @@ const WorkflowRuns: React.FC<WorkflowRunsProps> = ({ accessToken }) => {
   const fetchRunDetail = useCallback(
     async (run: WorkflowRun) => {
       if (!accessToken) return;
+      // Cancel any in-flight detail fetch so stale data never overwrites newer selection
+      detailAbortRef.current?.abort();
+      const controller = new AbortController();
+      detailAbortRef.current = controller;
+
       setSelectedRun(run);
       setDrawerOpen(true);
       setLoadingDetail(true);
@@ -708,11 +716,14 @@ const WorkflowRuns: React.FC<WorkflowRunsProps> = ({ accessToken }) => {
         const [evRes, msgRes] = await Promise.all([
           fetch(`${base}/v1/workflows/runs/${run.run_id}/events`, {
             headers: { Authorization: `Bearer ${accessToken}` },
+            signal: controller.signal,
           }),
           fetch(`${base}/v1/workflows/runs/${run.run_id}/messages`, {
             headers: { Authorization: `Bearer ${accessToken}` },
+            signal: controller.signal,
           }),
         ]);
+        if (controller.signal.aborted) return;
         const evData = evRes.ok ? await evRes.json() : { events: [] };
         const msgData = msgRes.ok ? await msgRes.json() : { messages: [] };
         setEvents(
@@ -726,9 +737,11 @@ const WorkflowRuns: React.FC<WorkflowRunsProps> = ({ accessToken }) => {
           )
         );
       } catch (err) {
+        if ((err as Error).name === "AbortError") return;
         console.error("workflow run detail fetch failed:", err);
+        message.error("Failed to load run details");
       } finally {
-        setLoadingDetail(false);
+        if (!controller.signal.aborted) setLoadingDetail(false);
       }
     },
     [accessToken]
