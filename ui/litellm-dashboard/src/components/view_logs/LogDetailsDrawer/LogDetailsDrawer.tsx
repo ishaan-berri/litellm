@@ -1,10 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { Button, Drawer } from "antd";
+import { Button } from "antd";
 import {
   CheckOutlined,
   CopyOutlined,
-  LeftOutlined,
-  RightOutlined,
 } from "@ant-design/icons";
 import { Bot, Sparkles, Wrench } from "lucide-react";
 import { LogEntry } from "../columns";
@@ -17,8 +15,8 @@ import { sessionSpendLogsCall } from "../../networking";
 import { useQuery } from "@tanstack/react-query";
 import { getSpendString } from "@/utils/dataUtils";
 import { normalizeGuardrailEntries } from "./utils";
-import { DRAWER_WIDTH } from "./constants";
 import { useLogDetails } from "@/app/(dashboard)/hooks/logDetails/useLogDetails";
+import { DrawerShell } from "@/components/shared/DrawerShell";
 
 export interface LogDetailsDrawerProps {
   open: boolean;
@@ -31,8 +29,6 @@ export interface LogDetailsDrawerProps {
   onSelectLog?: (log: LogEntry) => void;
   startTime?: string;
 }
-
-const SIDEBAR_WIDTH_PX = 224;
 
 /* ------------------------------------------------------------------ */
 /*  TraceEventRow — compact event row used in both session & non-     */
@@ -116,7 +112,6 @@ export function LogDetailsDrawer({
 }: LogDetailsDrawerProps) {
   const isSessionMode = Boolean(sessionId);
   const [selectedSessionRequestId, setSelectedSessionRequestId] = useState<string | null>(null);
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [copiedLeftPanelId, setCopiedLeftPanelId] = useState(false);
 
   const { data: sessionLogs = [] } = useQuery({
@@ -163,11 +158,8 @@ export function LogDetailsDrawer({
     }
   }, [isSessionMode, logEntry, selectedSessionRequestId, sessionLogs]);
 
-  // Reset transient UI state when the drawer opens or closes.
   useEffect(() => {
-    if (open) {
-      setIsSidebarCollapsed(false);
-    } else {
+    if (!open) {
       if (isSessionMode) setSelectedSessionRequestId(null);
       setCopiedLeftPanelId(false);
     }
@@ -243,169 +235,129 @@ export function LogDetailsDrawer({
 
   if (!currentLog || !enrichedLog) return null;
 
-  return (
-    <Drawer
-      title={null}
-      placement="right"
-      onClose={onClose}
-      open={open}
-      width={DRAWER_WIDTH}
-      closable={false}
-      mask={true}
-      maskClosable={true}
-      styles={{
-        body: { padding: 0, overflow: "hidden" },
-        header: { display: "none" },
-      }}
-    >
-      <div style={{ height: "100%" }} className="flex relative">
-          {!isSidebarCollapsed ? (
-            <Button
-              type="text"
-              size="small"
-              icon={<LeftOutlined />}
-              onClick={() => setIsSidebarCollapsed(true)}
-              className="absolute top-2 left-2 z-20 !bg-white !border !border-slate-200 !rounded-md"
-              aria-label="Collapse trace sidebar"
-            />
-          ) : (
-            <Button
-              type="text"
-              size="small"
-              icon={<RightOutlined />}
-              onClick={() => setIsSidebarCollapsed(false)}
-              className="absolute top-2 left-2 z-20 !bg-white !border !border-slate-200 !rounded-md"
-              aria-label="Expand trace sidebar"
-            />
-          )}
-          {!isSidebarCollapsed && (
-          <div
-            className="border-r border-slate-200 bg-slate-50 flex flex-col"
-            style={{ width: SIDEBAR_WIDTH_PX }}
-          >
-            <div className="pl-12 pr-3 py-2 border-b border-slate-200 bg-white">
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <div className="text-[10px] uppercase tracking-wide text-slate-500">
-                    {isSessionMode ? "Session" : "Trace"}
-                  </div>
-                  <div className="font-mono text-[12px] text-slate-900 leading-tight flex items-center gap-1">
-                    <span className="truncate">{leftPanelDisplayId}</span>
-                    <button
-                      type="button"
-                      onClick={handleCopyLeftPanelId}
-                      className="text-slate-400 hover:text-slate-600"
-                      aria-label="Copy trace id"
-                    >
-                      {copiedLeftPanelId ? (
-                        <CheckOutlined className="text-[11px]" />
-                      ) : (
-                        <CopyOutlined className="text-[11px]" />
-                      )}
-                    </button>
-                  </div>
-                </div>
-              </div>
-              <div className="mt-1 text-[11px] text-slate-500 font-mono">
-                {logsForList.length} req
-                {[
-                  isSessionMode
-                    ? llmCount
-                    : logsForList.filter(
-                        (row) =>
-                          !MCP_CALL_TYPES.includes(row.call_type) && !AGENT_CALL_TYPES.includes(row.call_type),
-                      ).length,
-                  isSessionMode ? agentCount : logsForList.filter((row) => AGENT_CALL_TYPES.includes(row.call_type)).length,
-                  isSessionMode ? mcpCount : logsForList.filter((row) => MCP_CALL_TYPES.includes(row.call_type)).length,
-                ].map((count, i) => {
-                  const label = [" LLM", " Agent", " MCP"][i];
-                  return count > 0 ? (
-                    <span key={label}>
-                      <span className="mx-1.5">·</span>
-                      {count}
-                      {label}
-                    </span>
-                  ) : null;
-                })}
-                <span className="mx-1.5">·</span>
-                {isSessionMode
-                  ? getSpendString(totalSessionCost)
-                  : getSpendString(currentLog.spend || 0)}
-                {isSessionMode && (
-                  <>
-                    <span className="mx-1.5">·</span>
-                    {sessionDurationSeconds}s
-                  </>
+  const sidebarContent = (
+    <>
+      <div className="pl-12 pr-3 py-2 border-b border-slate-200 bg-white">
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <div className="text-[10px] uppercase tracking-wide text-slate-500">
+              {isSessionMode ? "Session" : "Trace"}
+            </div>
+            <div className="font-mono text-[12px] text-slate-900 leading-tight flex items-center gap-1">
+              <span className="truncate">{leftPanelDisplayId}</span>
+              <button
+                type="button"
+                onClick={handleCopyLeftPanelId}
+                className="text-slate-400 hover:text-slate-600"
+                aria-label="Copy trace id"
+              >
+                {copiedLeftPanelId ? (
+                  <CheckOutlined className="text-[11px]" />
+                ) : (
+                  <CopyOutlined className="text-[11px]" />
                 )}
-              </div>
-            </div>
-
-            <div className="flex-1 overflow-y-auto">
-              {normalizeGuardrailEntries(metadata?.guardrail_information).length > 0 && (
-                <div className="px-3 pt-2">
-                  <GuardrailJumpLink guardrailEntries={normalizeGuardrailEntries(metadata?.guardrail_information)} />
-                </div>
-              )}
-              {isSessionMode ? (
-                <div className="py-1">
-                  {/* Child events — vertical tree line with horizontal connectors */}
-                  <div className="relative pl-2">
-                    <div className="absolute left-4 top-1 bottom-1 border-l border-slate-300" />
-                    {logsForList.map((row, idx) => {
-                      const isLast = idx === logsForList.length - 1;
-                      return (
-                        <div key={row.request_id} className="relative">
-                          <div className="absolute left-4 top-3 w-3 border-t border-slate-300" />
-                          {isLast && <div className="absolute left-4 top-3 bottom-0 w-px bg-slate-50" />}
-                          <TraceEventRow
-                            row={row}
-                            isSelected={row.request_id === currentLog.request_id}
-                            onClick={() => {
-                              setSelectedSessionRequestId(row.request_id);
-                              onSelectLog?.(row);
-                            }}
-                          />
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ) : (
-                <div className="py-1">
-                  {logsForList.map((row) => (
-                    <TraceEventRow
-                      key={row.request_id}
-                      row={row}
-                      isSelected={row.request_id === currentLog.request_id}
-                      onClick={() => onSelectLog?.(row)}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-          )}
-
-          <div className="flex-1 flex flex-col overflow-hidden">
-            <DrawerHeader
-              log={currentLog}
-              onClose={onClose}
-              onPrevious={selectPreviousLog}
-              onNext={selectNextLog}
-              statusLabel={statusLabel}
-              statusColor={statusColor}
-              environment={environment}
-            />
-            <div className="flex-1 overflow-y-auto">
-              <LogDetailContent
-                logEntry={enrichedLog}
-                onOpenSettings={onOpenSettings}
-                isLoadingDetails={isLoadingDetails}
-                accessToken={accessToken ?? null}
-              />
+              </button>
             </div>
           </div>
         </div>
-    </Drawer>
+        <div className="mt-1 text-[11px] text-slate-500 font-mono">
+          {logsForList.length} req
+          {[
+            isSessionMode
+              ? llmCount
+              : logsForList.filter(
+                  (row) =>
+                    !MCP_CALL_TYPES.includes(row.call_type) && !AGENT_CALL_TYPES.includes(row.call_type),
+                ).length,
+            isSessionMode ? agentCount : logsForList.filter((row) => AGENT_CALL_TYPES.includes(row.call_type)).length,
+            isSessionMode ? mcpCount : logsForList.filter((row) => MCP_CALL_TYPES.includes(row.call_type)).length,
+          ].map((count, i) => {
+            const label = [" LLM", " Agent", " MCP"][i];
+            return count > 0 ? (
+              <span key={label}>
+                <span className="mx-1.5">·</span>
+                {count}
+                {label}
+              </span>
+            ) : null;
+          })}
+          <span className="mx-1.5">·</span>
+          {isSessionMode
+            ? getSpendString(totalSessionCost)
+            : getSpendString(currentLog.spend || 0)}
+          {isSessionMode && (
+            <>
+              <span className="mx-1.5">·</span>
+              {sessionDurationSeconds}s
+            </>
+          )}
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto">
+        {normalizeGuardrailEntries(metadata?.guardrail_information).length > 0 && (
+          <div className="px-3 pt-2">
+            <GuardrailJumpLink guardrailEntries={normalizeGuardrailEntries(metadata?.guardrail_information)} />
+          </div>
+        )}
+        {isSessionMode ? (
+          <div className="py-1">
+            <div className="relative pl-2">
+              <div className="absolute left-4 top-1 bottom-1 border-l border-slate-300" />
+              {logsForList.map((row, idx) => {
+                const isLast = idx === logsForList.length - 1;
+                return (
+                  <div key={row.request_id} className="relative">
+                    <div className="absolute left-4 top-3 w-3 border-t border-slate-300" />
+                    {isLast && <div className="absolute left-4 top-3 bottom-0 w-px bg-slate-50" />}
+                    <TraceEventRow
+                      row={row}
+                      isSelected={row.request_id === currentLog.request_id}
+                      onClick={() => {
+                        setSelectedSessionRequestId(row.request_id);
+                        onSelectLog?.(row);
+                      }}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          <div className="py-1">
+            {logsForList.map((row) => (
+              <TraceEventRow
+                key={row.request_id}
+                row={row}
+                isSelected={row.request_id === currentLog.request_id}
+                onClick={() => onSelectLog?.(row)}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    </>
+  );
+
+  return (
+    <DrawerShell open={open} onClose={onClose} sidebarContent={sidebarContent}>
+      <DrawerHeader
+        log={currentLog}
+        onClose={onClose}
+        onPrevious={selectPreviousLog}
+        onNext={selectNextLog}
+        statusLabel={statusLabel}
+        statusColor={statusColor}
+        environment={environment}
+      />
+      <div className="flex-1 overflow-y-auto">
+        <LogDetailContent
+          logEntry={enrichedLog}
+          onOpenSettings={onOpenSettings}
+          isLoadingDetails={isLoadingDetails}
+          accessToken={accessToken ?? null}
+        />
+      </div>
+    </DrawerShell>
   );
 }
