@@ -527,7 +527,7 @@ const WorkflowRunDrawer: React.FC<WorkflowRunDrawerProps> = ({
   );
 
   return (
-    <DrawerShell open={open} onClose={onClose} width="100%" sidebarContent={sidebarContent}>
+    <DrawerShell open={open} onClose={onClose} sidebarContent={sidebarContent}>
       {selectedRun && (
         <WorkflowDrawerHeader
           run={selectedRun}
@@ -750,7 +750,7 @@ const WorkflowRuns: React.FC<WorkflowRunsProps> = ({ accessToken }) => {
   }, [selectedRun, fetchRunDetail]);
 
   return (
-    <div style={{ padding: "24px 32px", minHeight: "calc(100vh - 64px)", background: "#fff" }}>
+    <div className="w-full max-w-screen p-6 overflow-x-hidden box-border" style={{ minHeight: "calc(100vh - 64px)", background: "#fff" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
         <div>
           <div style={{ fontSize: 18, fontWeight: 600, color: "#18181b" }}>Workflow Runs</div>
