@@ -413,26 +413,28 @@ const WorkflowDrawerHeader: React.FC<{
   );
 };
 
-// ── sidebar run row (mirrors TraceEventRow from LogDetailsDrawer) ──────────────
+// ── sidebar message row ───────────────────────────────────────────────────────
 
-const SidebarRunRow: React.FC<{
-  run: WorkflowRun;
-  isSelected: boolean;
-  onClick: () => void;
-}> = ({ run, isSelected, onClick }) => (
-  <button
-    type="button"
-    className={`w-full text-left pl-8 pr-2 py-1 transition-colors ${isSelected ? "bg-blue-50" : "hover:bg-slate-100"}`}
-    onClick={onClick}
-  >
-    <div className="flex items-center gap-1.5">
-      <StatusDot status={run.status} size={7} />
-      <span className="text-xs font-medium text-slate-900 truncate">{runTitle(run)}</span>
+const MSG_ROLE_COLOR: Record<string, string> = {
+  user: "#2563eb",
+  assistant: "#16a34a",
+  system: "#7c3aed",
+  tool_result: "#d97706",
+};
+
+const SidebarMessageRow: React.FC<{ msg: WorkflowRunMessage }> = ({ msg }) => (
+  <div className="px-3 py-2 border-b border-slate-100 last:border-0">
+    <div
+      className="text-[10px] font-mono font-semibold mb-0.5"
+      style={{ color: MSG_ROLE_COLOR[msg.role] ?? "#52525b" }}
+    >
+      [{msg.role}]
     </div>
-    <div className="text-[10px] text-slate-500 mt-0 font-mono">
-      {run.run_id.slice(0, 8)} · {timeAgo(run.created_at)}
+    <div className="text-[11px] text-slate-600 leading-tight line-clamp-2">
+      {msg.content.slice(0, 120)}
     </div>
-  </button>
+    <div className="text-[10px] text-slate-400 font-mono mt-0.5">{timeAgo(msg.created_at)}</div>
+  </div>
 );
 
 // ── workflow run drawer ───────────────────────────────────────────────────────
@@ -490,7 +492,7 @@ const WorkflowRunDrawer: React.FC<WorkflowRunDrawerProps> = ({
   const sidebarContent = (
     <>
       <div className="pl-12 pr-3 py-2 border-b border-slate-200 bg-white">
-        <div className="text-[10px] uppercase tracking-wide text-slate-500">Runs</div>
+        <div className="text-[10px] uppercase tracking-wide text-slate-500">Messages</div>
         <div className="font-mono text-[12px] text-slate-900 leading-tight flex items-center gap-1">
           <span className="truncate">{displayIdShort}</span>
           <button
@@ -507,35 +509,25 @@ const WorkflowRunDrawer: React.FC<WorkflowRunDrawerProps> = ({
           </button>
         </div>
         <div className="mt-1 text-[11px] text-slate-500 font-mono">
-          {allRuns.length} run{allRuns.length !== 1 ? "s" : ""}
+          {messages.length} message{messages.length !== 1 ? "s" : ""}
         </div>
       </div>
       <div className="flex-1 overflow-y-auto">
-        <div className="py-1">
-          <div className="relative pl-2">
-            <div className="absolute left-4 top-1 bottom-1 border-l border-slate-300" />
-            {allRuns.map((run, idx) => {
-              const isLast = idx === allRuns.length - 1;
-              return (
-                <div key={run.run_id} className="relative">
-                  <div className="absolute left-4 top-3 w-3 border-t border-slate-300" />
-                  {isLast && <div className="absolute left-4 top-3 bottom-0 w-px bg-slate-50" />}
-                  <SidebarRunRow
-                    run={run}
-                    isSelected={run.run_id === selectedRun?.run_id}
-                    onClick={() => onSelectRun(run)}
-                  />
-                </div>
-              );
-            })}
+        {messages.length === 0 ? (
+          <div className="px-3 py-4 text-[11px] text-slate-400 font-mono">
+            {loadingDetail ? "Loading…" : "No messages"}
           </div>
-        </div>
+        ) : (
+          messages.map((msg) => (
+            <SidebarMessageRow key={msg.message_id} msg={msg} />
+          ))
+        )}
       </div>
     </>
   );
 
   return (
-    <DrawerShell open={open} onClose={onClose} sidebarContent={sidebarContent}>
+    <DrawerShell open={open} onClose={onClose} width="100%" sidebarContent={sidebarContent}>
       {selectedRun && (
         <WorkflowDrawerHeader
           run={selectedRun}
