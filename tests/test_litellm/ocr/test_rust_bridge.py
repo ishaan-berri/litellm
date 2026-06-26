@@ -9,7 +9,10 @@ import httpx
 import pytest
 
 import litellm
+from litellm.integrations.custom_guardrail import CustomGuardrail
+from litellm.integrations.custom_logger import CustomLogger
 from litellm.llms.base_llm.ocr.transformation import OCRResponse
+from litellm.types.guardrails import GuardrailEventHooks
 
 # `litellm/__init__.py` does `from .ocr.main import *`, which binds the `ocr`
 # function onto `litellm.ocr` and shadows the submodule, so import the modules
@@ -53,6 +56,8 @@ class RecordingBridge:
         extra_headers: dict[str, object] | None,
         optional_params: dict[str, object],
         timeout_seconds: float | None,
+        callbacks: list[object] | None = None,
+        guardrails: list[object] | None = None,
     ) -> dict[str, object]:
         self.calls.append(
             {
@@ -64,6 +69,8 @@ class RecordingBridge:
                 "extra_headers": extra_headers,
                 "optional_params": optional_params,
                 "timeout_seconds": timeout_seconds,
+                "callbacks": callbacks or [],
+                "guardrails": guardrails or [],
             }
         )
         return dict(FAKE_OCR_RESPONSE)
@@ -85,6 +92,8 @@ class RecordingAsyncBridge:
         extra_headers: dict[str, object] | None,
         optional_params: dict[str, object],
         timeout_seconds: float | None,
+        callbacks: list[object] | None = None,
+        guardrails: list[object] | None = None,
     ) -> dict[str, object]:
         self.calls.append(
             {
@@ -96,9 +105,79 @@ class RecordingAsyncBridge:
                 "extra_headers": extra_headers,
                 "optional_params": optional_params,
                 "timeout_seconds": timeout_seconds,
+                "callbacks": callbacks or [],
+                "guardrails": guardrails or [],
             }
         )
         return dict(FAKE_OCR_RESPONSE)
+
+
+class ExecutingAsyncBridge(RecordingAsyncBridge):
+    """A fake native bridge that executes received Python callbacks.
+
+    The real Rust bridge wraps these objects as Rust trait objects. This bridge
+    keeps the Python OCR test independent from a locally built native wheel
+    while proving the Python side collects callbacks from the manager and passes
+    them into the Rust path.
+    """
+
+    async def __call__(
+        self,
+        model: str,
+        document: dict[str, object],
+        api_key: str | None,
+        api_base: str | None,
+        custom_llm_provider: str | None,
+        extra_headers: dict[str, object] | None,
+        optional_params: dict[str, object],
+        timeout_seconds: float | None,
+        callbacks: list[object] | None = None,
+        guardrails: list[object] | None = None,
+    ) -> dict[str, object]:
+        request_data: dict[str, object] = {
+            "model": model,
+            "custom_llm_provider": custom_llm_provider,
+            "document": dict(document),
+            "optional_params": dict(optional_params),
+        }
+        for guardrail in guardrails or []:
+            result = await guardrail.async_pre_call_hook(
+                user_api_key_dict=None,
+                cache=None,
+                data=request_data,
+                call_type="ocr",
+            )
+            if isinstance(result, dict):
+                request_data = result
+
+        response = dict(FAKE_OCR_RESPONSE)
+        for callback in callbacks or []:
+            await callback.async_log_success_event(
+                kwargs={
+                    "model": model,
+                    "custom_llm_provider": custom_llm_provider,
+                    "call_type": "ocr",
+                },
+                response_obj=response,
+                start_time=0.0,
+                end_time=1.0,
+            )
+
+        self.calls.append(
+            {
+                "model": model,
+                "document": request_data["document"],
+                "api_key": api_key,
+                "api_base": api_base,
+                "custom_llm_provider": custom_llm_provider,
+                "extra_headers": extra_headers,
+                "optional_params": request_data["optional_params"],
+                "timeout_seconds": timeout_seconds,
+                "callbacks": callbacks or [],
+                "guardrails": guardrails or [],
+            }
+        )
+        return response
 
 
 class RaisingBridge:
@@ -112,6 +191,8 @@ class RaisingBridge:
         extra_headers: dict[str, object] | None,
         optional_params: dict[str, object],
         timeout_seconds: float | None,
+        callbacks: list[object] | None = None,
+        guardrails: list[object] | None = None,
     ) -> dict[str, object]:
         raise RuntimeError("bridge failed")
 
@@ -127,6 +208,8 @@ class RaisingAsyncBridge:
         extra_headers: dict[str, object] | None,
         optional_params: dict[str, object],
         timeout_seconds: float | None,
+        callbacks: list[object] | None = None,
+        guardrails: list[object] | None = None,
     ) -> dict[str, object]:
         raise RuntimeError("bridge failed")
 
@@ -214,9 +297,11 @@ def build_prepared_request(
 @pytest.fixture(autouse=True)
 def _reset_rust_flag():
     """Keep the global toggle isolated between tests."""
+    litellm.logging_callback_manager._reset_all_callbacks()
     rust_bridge.use_litellm_rust(False, ocr=None, aocr=None)
     rust_bridge_loader._cached_bridge = rust_bridge_loader._BRIDGE_SENTINEL
     yield
+    litellm.logging_callback_manager._reset_all_callbacks()
     rust_bridge.use_litellm_rust(False, ocr=None, aocr=None)
     rust_bridge_loader._cached_bridge = rust_bridge_loader._BRIDGE_SENTINEL
 
@@ -400,6 +485,8 @@ def test_bridge_wrapper_forwards_prepared_args_and_wraps_response():
         },
         "optional_params": {"include_image_base64": True, "pages": [0]},
         "timeout_seconds": 12.5,
+        "callbacks": [],
+        "guardrails": [],
     }
 
 
@@ -429,6 +516,8 @@ async def test_bridge_wrapper_forwards_prepared_async_args_and_wraps_response():
         "extra_headers": None,
         "optional_params": {"vertex_project": "project-1"},
         "timeout_seconds": 42.0,
+        "callbacks": [],
+        "guardrails": [],
     }
 
 
@@ -462,6 +551,8 @@ def test_run_rust_ocr_prepares_request_and_wraps_response():
         },
         "optional_params": {"include_image_base64": True},
         "timeout_seconds": 12.5,
+        "callbacks": [],
+        "guardrails": [],
     }
 
 
@@ -660,6 +751,92 @@ def test_ocr_routes_to_rust_when_enabled(fake_bridge):
         "x-trace-id": "trace-1",
     }
     assert call["optional_params"].get("include_image_base64") is True
+
+
+@pytest.mark.asyncio
+async def test_aocr_rust_path_executes_custom_logger_from_callback_manager():
+    class OCRCustomLogger(CustomLogger):
+        def __init__(self) -> None:
+            super().__init__()
+            self.events: list[dict[str, object]] = []
+
+        async def async_log_success_event(
+            self, kwargs, response_obj, start_time, end_time
+        ):
+            self.events.append(
+                {
+                    "kwargs": kwargs,
+                    "response_obj": response_obj,
+                    "start_time": start_time,
+                    "end_time": end_time,
+                }
+            )
+
+    logger = OCRCustomLogger()
+    bridge = ExecutingAsyncBridge()
+    litellm.logging_callback_manager.add_litellm_callback(logger)
+    litellm.use_litellm_rust(True, aocr=bridge)
+
+    response = await litellm.aocr(
+        model=MODEL,
+        document=DOCUMENT,
+        api_key="sk-test",
+    )
+
+    assert response.pages[0].markdown == "hello world"
+    assert bridge.calls[0]["callbacks"] == [logger]
+    assert logger.events == [
+        {
+            "kwargs": {
+                "model": "mistral-ocr-latest",
+                "custom_llm_provider": "mistral",
+                "call_type": "ocr",
+            },
+            "response_obj": FAKE_OCR_RESPONSE,
+            "start_time": 0.0,
+            "end_time": 1.0,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_aocr_rust_path_executes_custom_guardrail_from_callback_manager():
+    class OCRCustomGuardrail(CustomGuardrail):
+        def __init__(self) -> None:
+            super().__init__(
+                guardrail_name="ocr-test-guardrail",
+                event_hook=GuardrailEventHooks.pre_call,
+            )
+            self.events: list[dict[str, object]] = []
+
+        async def async_pre_call_hook(self, user_api_key_dict, cache, data, call_type):
+            self.events.append({"data": data, "call_type": call_type})
+            data["document"] = {
+                **data["document"],
+                "guardrail_executed": True,
+            }
+            data["optional_params"] = {
+                **data["optional_params"],
+                "include_image_base64": True,
+            }
+            return data
+
+    guardrail = OCRCustomGuardrail()
+    bridge = ExecutingAsyncBridge()
+    litellm.logging_callback_manager.add_litellm_callback(guardrail)
+    litellm.use_litellm_rust(True, aocr=bridge)
+
+    response = await litellm.aocr(
+        model=MODEL,
+        document=DOCUMENT,
+        api_key="sk-test",
+    )
+
+    assert response.pages[0].markdown == "hello world"
+    assert bridge.calls[0]["guardrails"] == [guardrail]
+    assert bridge.calls[0]["document"]["guardrail_executed"] is True
+    assert bridge.calls[0]["optional_params"]["include_image_base64"] is True
+    assert guardrail.events[0]["call_type"] == "ocr"
 
 
 def test_ocr_routes_azure_ai_to_rust_when_enabled(fake_bridge):
