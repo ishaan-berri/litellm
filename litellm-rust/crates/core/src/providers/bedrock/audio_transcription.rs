@@ -9,10 +9,8 @@ use crate::audio_transcription::types::{
 use crate::error::{CoreError, CoreResult, json_type_name};
 
 use super::aws_base::AwsAuthConfig;
-use super::constants::{
-    AWS_REGION, AWS_REGION_NAME, BEDROCK_RUNTIME_ENDPOINT_TEMPLATE, BEDROCK_SERVICE,
-    DEFAULT_BEDROCK_REGION,
-};
+use super::common_utils::resolve_bedrock_region;
+use super::constants::{AWS_REGION_NAME, BEDROCK_RUNTIME_ENDPOINT_TEMPLATE, BEDROCK_SERVICE};
 
 const SUPPORTED_PARAMS: &[&str] = &["language", "prompt", "temperature", "response_format"];
 
@@ -58,25 +56,6 @@ fn is_bedrock_region(value: &str) -> bool {
         && value
             .chars()
             .all(|char| char.is_ascii_alphanumeric() || char == '-')
-}
-
-pub fn resolve_bedrock_region(
-    model_region: Option<&str>,
-    optional_params: &Map<String, Value>,
-    env_lookup: &dyn Fn(&str) -> Option<String>,
-) -> String {
-    if let Some(region) = optional_params
-        .get("aws_region_name")
-        .and_then(Value::as_str)
-    {
-        return region.to_string();
-    }
-    if let Some(region) = model_region {
-        return region.to_string();
-    }
-    env_lookup(AWS_REGION_NAME)
-        .or_else(|| env_lookup(AWS_REGION))
-        .unwrap_or_else(|| DEFAULT_BEDROCK_REGION.to_string())
 }
 
 fn audio_fields(audio: Value) -> CoreResult<(String, String)> {

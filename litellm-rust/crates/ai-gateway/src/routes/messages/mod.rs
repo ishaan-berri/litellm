@@ -265,6 +265,7 @@ mod tests {
             master_key: master_key.map(Arc::from),
             loggers: Arc::new(Vec::new()),
             realtime_pool: RealtimePool::disabled(),
+            logging_sink: None,
         }
     }
 

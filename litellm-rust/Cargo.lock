@@ -1279,6 +1279,7 @@ dependencies = [
  "bytes",
  "colored_json",
  "futures-util",
+ "percent-encoding",
  "rand 0.8.7",
  "reqwest",
  "serde",

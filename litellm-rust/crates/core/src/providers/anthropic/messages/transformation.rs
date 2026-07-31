@@ -1,3 +1,5 @@
+use serde_json::{Map, Value};
+
 use crate::error::{CoreError, CoreResult};
 use crate::messages::transformation::{AnthropicMessagesProviderConfig, MessagesAuthStrategy};
 
@@ -51,6 +53,8 @@ impl AnthropicMessagesProviderConfig for AnthropicMessagesConfig {
         &self,
         api_base: Option<&str>,
         _model: &str,
+        _optional_params: &Map<String, Value>,
+        _stream: bool,
         env_lookup: &dyn Fn(&str) -> Option<String>,
     ) -> CoreResult<String> {
         Ok(complete_anthropic_url(api_base, env_lookup))

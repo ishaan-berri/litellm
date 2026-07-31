@@ -58,7 +58,13 @@ pub(super) fn prepare_messages_call(
         headers.push(("content-type".to_string(), "application/json".to_string()));
     }
 
-    let url = config.complete_url(request.api_base, &model, &env_lookup)?;
+    let url = config.complete_url(
+        request.api_base,
+        &model,
+        &request.optional_params,
+        request.stream,
+        &env_lookup,
+    )?;
     let typed_request = serde_json::from_value(request.body).map_err(|err| {
         CoreError::InvalidRequest(format!("invalid Anthropic messages request: {err}"))
     })?;
