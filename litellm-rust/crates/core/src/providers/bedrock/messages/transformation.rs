@@ -12,6 +12,7 @@ use super::super::constants::{
     BEDROCK_INVOKE_PATH_SUFFIX, BEDROCK_INVOKE_STREAM_PATH_SUFFIX,
     BEDROCK_RUNTIME_ENDPOINT_TEMPLATE,
 };
+use super::body;
 
 pub struct BedrockMessagesConfig;
 
@@ -160,6 +161,16 @@ impl AnthropicMessagesProviderConfig for BedrockMessagesConfig {
             .entry("anthropic_version")
             .or_insert_with(|| Value::String(BEDROCK_ANTHROPIC_VERSION.to_string()));
 
+        // Nested cleanups run before the top-level allowlist below, which keeps
+        // `tools` wholesale and so cannot reach inside it.
+        let tools = request.tools.map(|tools| {
+            body::strip_cache_control_scope_from_tools(body::ensure_tool_names(
+                body::normalize_tool_input_schema_types(body::remove_custom_field_from_tools(
+                    tools,
+                )),
+            ))
+        });
+
         Ok(AnthropicMessagesRequest {
             // Bedrock takes the model in the URL path and rejects it in the body.
             model: String::new(),
@@ -172,6 +183,10 @@ impl AnthropicMessagesProviderConfig for BedrockMessagesConfig {
             output_format: None,
             speed: None,
             inference_geo: None,
+            tools,
+            context_management: body::filter_context_management(request.context_management),
+            system: body::strip_cache_control_scope_from_system(request.system),
+            messages: body::strip_cache_control_scope_from_messages(request.messages),
             extra,
             ..request
         })
@@ -385,18 +400,62 @@ mod tests {
         );
     }
 
+    /// The payload claude-cli 2.1.220 actually sends, reduced to the fields that
+    /// exercise a transform. Bedrock 400s on the `context_management` edit.
+    fn claude_code_request() -> Value {
+        json!({
+            "model": "claude",
+            "stream": true,
+            "max_tokens": 10,
+            "context_management": {"edits": [{"keep": "all", "type": "clear_thinking_20251015"}]},
+            "system": [{"type": "text", "text": "sys",
+                        "cache_control": {"type": "ephemeral", "scope": "global"}}],
+            "messages": [{"role": "user", "content": [
+                {"type": "text", "text": "hi",
+                 "cache_control": {"type": "ephemeral", "scope": "global"}}]}],
+            "tools": [{"input_schema": {"type": "custom"}, "custom": {"defer_loading": true}}],
+            "thinking": {"type": "enabled", "budget_tokens": 1024},
+            "metadata": {"user_id": "kept"}
+        })
+    }
+
+    #[test]
+    fn claude_code_payload_is_shaped_for_bedrock() {
+        let value = serde_json::to_value(
+            BEDROCK_MESSAGES_CONFIG
+                .transform_request(request(claude_code_request()))
+                .expect("transform"),
+        )
+        .expect("json");
+
+        // The 400: the only edit Claude Code sends is unsupported, so the whole
+        // field must go rather than be forwarded empty.
+        assert!(value.get("context_management").is_none());
+        assert!(value["tools"][0].get("custom").is_none());
+        assert_eq!(value["tools"][0]["input_schema"]["type"], "object");
+        assert_eq!(value["tools"][0]["name"], "litellm_unnamed_tool_0");
+        assert_eq!(
+            value["system"][0]["cache_control"],
+            json!({"type": "ephemeral"})
+        );
+        assert_eq!(
+            value["messages"][0]["content"][0]["cache_control"],
+            json!({"type": "ephemeral"})
+        );
+        assert_eq!(
+            value["thinking"],
+            json!({"type": "enabled", "budget_tokens": 1024})
+        );
+        assert_eq!(value["metadata"], json!({"user_id": "kept"}));
+        assert_eq!(value["anthropic_version"], ANTHROPIC_VERSION);
+    }
+
     #[test]
     fn transform_request_is_idempotent() {
         // The Python bridge hands Rust an already-transformed body, so a second
         // pass must be a no-op or the wire request diverges.
         let once = BEDROCK_MESSAGES_CONFIG
-            .transform_request(request(json!({
-                "model": "claude",
-                "stream": true,
-                "max_tokens": 10,
-                "messages": [{"role": "user", "content": "hello"}],
-                "anthropic_beta": ["compact-2026-01-12"]
-            })))
+            .transform_request(request(claude_code_request()))
             .expect("transform");
         let twice = BEDROCK_MESSAGES_CONFIG
             .transform_request(once.clone())
