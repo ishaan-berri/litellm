@@ -11,6 +11,7 @@ reqwest.workspace = true
 bytes.workspace = true
 futures-util.workspace = true
 url.workspace = true
+percent-encoding.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 colored_json.workspace = true

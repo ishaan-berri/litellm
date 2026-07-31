@@ -479,3 +479,127 @@ async def test_gate_falls_back_when_bridge_unavailable(monkeypatch):
     response = await _gate()
 
     assert response is None
+
+
+class OptionalParamsRecordingAsyncMessages:
+    """Matches the current native signature, unlike the legacy fakes above."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    async def __call__(
+        self,
+        model: str,
+        body: dict[str, object],
+        api_key: str | None,
+        api_base: str | None,
+        custom_llm_provider: str | None,
+        extra_headers: dict[str, object] | None,
+        timeout_seconds: float | None,
+        optional_params: dict[str, object],
+        debug: bool,
+    ) -> dict[str, object]:
+        self.calls.append({"optional_params": optional_params})
+        return dict(FAKE_MESSAGES_RESPONSE)
+
+
+BEARER_HEADERS = {"Authorization": "Bearer aws-bearer-token", "Content-Type": "application/json"}
+
+
+@pytest.mark.asyncio
+async def test_gate_forwards_aws_routing_params_to_rust():
+    bridge = OptionalParamsRecordingAsyncMessages()
+    litellm.use_litellm_rust(True, amessages=bridge)
+
+    response = await _gate(
+        custom_llm_provider="bedrock",
+        litellm_params=GenericLiteLLMParams(
+            rust=True,
+            aws_region_name="us-east-1",
+            aws_bedrock_runtime_endpoint="https://vpce.example",
+        ),
+        headers=dict(BEARER_HEADERS),
+    )
+
+    assert response is not None
+    assert bridge.calls[0]["optional_params"] == {
+        "aws_region_name": "us-east-1",
+        "aws_bedrock_runtime_endpoint": "https://vpce.example",
+    }
+
+
+@pytest.mark.asyncio
+async def test_legacy_bridge_without_optional_params_is_not_broken():
+    # A stale native build lacks the newer argument; forwarding it would raise
+    # a TypeError that the gate silently turns into a Python fallback.
+    bridge = RecordingAsyncMessages()
+    litellm.use_litellm_rust(True, amessages=bridge)
+
+    response = await _gate(
+        custom_llm_provider="bedrock",
+        litellm_params=GenericLiteLLMParams(rust=True, aws_region_name="us-east-1"),
+        headers=dict(BEARER_HEADERS),
+    )
+
+    assert response is not None
+    assert "optional_params" not in bridge.calls[0]
+
+
+def test_rust_bridge_optional_params_is_json_safe():
+    # litellm_params is an extra="allow" model that carries the live logging
+    # object, so forwarding it wholesale would fail to marshal into Rust.
+    import json
+
+    from litellm.litellm_core_utils.litellm_logging import Logging
+
+    litellm_params = GenericLiteLLMParams(
+        rust=True,
+        aws_region_name="us-east-1",
+        model_id="arn:aws:bedrock:us-east-1:1:inference-profile/x",
+        litellm_logging_obj=Logging(
+            model="claude-sonnet-4-5",
+            messages=[],
+            stream=False,
+            call_type="acompletion",
+            start_time=None,
+            litellm_call_id="abc",
+            function_id="fn",
+        ),
+        mock_response="not-a-routing-key",
+    )
+
+    extracted = BaseLLMHTTPHandler._rust_bridge_optional_params(litellm_params)
+
+    assert extracted == {
+        "aws_region_name": "us-east-1",
+        "model_id": "arn:aws:bedrock:us-east-1:1:inference-profile/x",
+    }
+    json.dumps(extracted)
+
+
+@pytest.mark.asyncio
+async def test_gate_skips_bedrock_when_python_signed_with_sigv4():
+    # Python signed the body it serialized; Rust re-serializes, so the SigV4
+    # payload hash could never match and the request would 403.
+    bridge = RecordingAsyncMessages()
+    litellm.use_litellm_rust(True, amessages=bridge)
+
+    response = await _gate(
+        custom_llm_provider="bedrock",
+        litellm_params=GenericLiteLLMParams(rust=True),
+        headers={"Authorization": "AWS4-HMAC-SHA256 Credential=AKIA/...", "Content-Type": "application/json"},
+    )
+
+    assert response is None
+    assert bridge.calls == []
+
+
+@pytest.mark.asyncio
+async def test_gate_still_runs_rust_for_non_bedrock_without_bearer():
+    bridge = RecordingAsyncMessages()
+    litellm.use_litellm_rust(True, amessages=bridge)
+
+    response = await _gate(headers={"x-api-key": "sk-azure"})
+
+    assert response is not None
+    assert len(bridge.calls) == 1

@@ -2261,6 +2261,36 @@ class BaseLLMHTTPHandler:
         return os.getenv("LITELLM_RUST", "").strip().lower() in {"1", "true", "yes", "on"}
 
     @staticmethod
+    def _rust_bridge_optional_params(litellm_params: GenericLiteLLMParams) -> dict[str, object]:
+        """The routing keys Rust needs to rebuild the URL Python already built.
+
+        Only these are forwarded, not the whole ``litellm_params``: it is an
+        ``extra="allow"`` model that also carries the live logging object, and the
+        bridge marshals this dict through ``json.dumps``.
+        """
+        return {
+            key: value
+            for key in ("aws_region_name", "aws_bedrock_runtime_endpoint", "model_id")
+            if isinstance(value := litellm_params.get(key), str)
+        }
+
+    @staticmethod
+    def _rust_bridge_supports_auth(custom_llm_provider: str, headers: dict) -> bool:
+        """Bedrock reaches Rust only when Python authenticated with a bearer token.
+
+        Under SigV4 the forwarded Authorization header signs Python's exact body
+        bytes; Rust re-serializes the body, so the payload hash can never match
+        and every request would burn a rejected AWS round trip before falling back.
+        """
+        if custom_llm_provider != "bedrock":
+            return True
+        authorization = next(
+            (value for key, value in headers.items() if key.lower() == "authorization"),
+            None,
+        )
+        return isinstance(authorization, str) and authorization.strip().lower().startswith("bearer ")
+
+    @staticmethod
     async def _maybe_rust_anthropic_messages(
         *,
         custom_llm_provider: str,
@@ -2279,6 +2309,8 @@ class BaseLLMHTTPHandler:
             return None
         if has_agentic_hook:
             return None
+        if not BaseLLMHTTPHandler._rust_bridge_supports_auth(custom_llm_provider, headers):
+            return None
 
         from litellm.rust_bridge import messages as rust_messages_bridge
 
@@ -2291,6 +2323,7 @@ class BaseLLMHTTPHandler:
                 api_base=api_base,
                 custom_llm_provider=custom_llm_provider,
                 extra_headers=headers,
+                optional_params=BaseLLMHTTPHandler._rust_bridge_optional_params(litellm_params),
                 timeout=timeout,
             )
         except Exception as rust_error:  # noqa: BLE001  # rollout-safety fallback: any Rust bridge failure must fall back to the Python path

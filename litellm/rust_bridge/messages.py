@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Awaitable, Final, Protocol, Union, cast
+from typing import Awaitable, Final, Protocol, TypedDict, Union, cast
 
 import httpx
 import inspect
@@ -13,6 +14,8 @@ from litellm.rust_bridge.timeouts import timeout_to_seconds
 
 
 class RustMessages(Protocol):
+    # `optional_params` and `debug` default, mirroring the native signature, so a
+    # bridge predating either can still be called.
     def __call__(
         self,
         model: str,
@@ -22,7 +25,8 @@ class RustMessages(Protocol):
         custom_llm_provider: str | None,
         extra_headers: dict[str, object] | None,
         timeout_seconds: float | None,
-        debug: bool,
+        optional_params: dict[str, object] = ...,
+        debug: bool = ...,
     ) -> dict[str, object]:
         raise NotImplementedError
 
@@ -37,7 +41,8 @@ class RustAmessages(Protocol):
         custom_llm_provider: str | None,
         extra_headers: dict[str, object] | None,
         timeout_seconds: float | None,
-        debug: bool,
+        optional_params: dict[str, object] = ...,
+        debug: bool = ...,
     ) -> Awaitable[dict[str, object]]:
         raise NotImplementedError
 
@@ -91,6 +96,45 @@ def load_rust_amessages() -> RustAmessages | None:
     return cast(RustAmessages, getattr(native_bridge, "amessages", None))
 
 
+class _CommonBridgeKwargs(TypedDict):
+    model: str
+    body: dict[str, object]
+    api_key: str | None
+    api_base: str | None
+    custom_llm_provider: str | None
+    extra_headers: dict[str, object] | None
+    timeout_seconds: float | None
+
+
+def _common_kwargs(
+    *,
+    model: str,
+    body: dict[str, object],
+    api_key: str | None,
+    api_base: str | None,
+    custom_llm_provider: str | None,
+    extra_headers: dict[str, object] | None,
+    timeout: float | httpx.Timeout | None,
+) -> _CommonBridgeKwargs:
+    return _CommonBridgeKwargs(
+        model=model,
+        body=body,
+        api_key=api_key,
+        api_base=api_base,
+        custom_llm_provider=custom_llm_provider,
+        extra_headers=extra_headers,
+        timeout_seconds=timeout_to_seconds(timeout),
+    )
+
+
+def _declares(bridge: Callable[..., object], parameter: str) -> bool:
+    """A native extension left over from an older build can be missing the newer
+    arguments; passing them anyway raises a TypeError the caller swallows into a
+    silent Python fallback. The signatures only ever grew, so a bridge that knows
+    `optional_params` also knows `debug`."""
+    return parameter in inspect.signature(bridge).parameters
+
+
 def messages(
     *,
     model: str,
@@ -100,30 +144,29 @@ def messages(
     custom_llm_provider: str | None,
     extra_headers: dict[str, object] | None,
     timeout: Union[float, httpx.Timeout] | None,
+    optional_params: dict[str, object] | None = None,
 ) -> dict[str, object] | None:
     rust_messages = load_rust_messages()
     if rust_messages is None:
         return None
-    if "debug" in inspect.signature(rust_messages).parameters:
-        return rust_messages(
-            model=model,
-            body=body,
-            api_key=api_key,
-            api_base=api_base,
-            custom_llm_provider=custom_llm_provider,
-            extra_headers=extra_headers,
-            timeout_seconds=timeout_to_seconds(timeout),
-            debug=_is_debugging_on(),
-        )
-    return rust_messages(
+    common = _common_kwargs(
         model=model,
         body=body,
         api_key=api_key,
         api_base=api_base,
         custom_llm_provider=custom_llm_provider,
         extra_headers=extra_headers,
-        timeout_seconds=timeout_to_seconds(timeout),
+        timeout=timeout,
     )
+    if _declares(rust_messages, "optional_params"):
+        return rust_messages(
+            **common,
+            optional_params=optional_params or {},
+            debug=_is_debugging_on(),
+        )
+    if _declares(rust_messages, "debug"):
+        return rust_messages(**common, debug=_is_debugging_on())
+    return rust_messages(**common)
 
 
 async def amessages(
@@ -135,27 +178,26 @@ async def amessages(
     custom_llm_provider: str | None,
     extra_headers: dict[str, object] | None,
     timeout: Union[float, httpx.Timeout] | None,
+    optional_params: dict[str, object] | None = None,
 ) -> dict[str, object] | None:
     rust_amessages = load_rust_amessages()
     if rust_amessages is None:
         return None
-    if "debug" in inspect.signature(rust_amessages).parameters:
-        return await rust_amessages(
-            model=model,
-            body=body,
-            api_key=api_key,
-            api_base=api_base,
-            custom_llm_provider=custom_llm_provider,
-            extra_headers=extra_headers,
-            timeout_seconds=timeout_to_seconds(timeout),
-            debug=_is_debugging_on(),
-        )
-    return await rust_amessages(
+    common = _common_kwargs(
         model=model,
         body=body,
         api_key=api_key,
         api_base=api_base,
         custom_llm_provider=custom_llm_provider,
         extra_headers=extra_headers,
-        timeout_seconds=timeout_to_seconds(timeout),
+        timeout=timeout,
     )
+    if _declares(rust_amessages, "optional_params"):
+        return await rust_amessages(
+            **common,
+            optional_params=optional_params or {},
+            debug=_is_debugging_on(),
+        )
+    if _declares(rust_amessages, "debug"):
+        return await rust_amessages(**common, debug=_is_debugging_on())
+    return await rust_amessages(**common)

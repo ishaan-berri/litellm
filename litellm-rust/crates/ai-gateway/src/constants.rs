@@ -40,3 +40,9 @@ pub(crate) const MESSAGES_ROUTE_PATH: &str = "/v1/messages";
 #[cfg(feature = "server")]
 pub(crate) const MESSAGES_HEADERS_NOT_FORWARDED: &[&str] =
     &["authorization", "connection", "content-length", "host"];
+
+/// Matched against the provider `core` resolved for a streaming response.
+/// Bedrock answers with `application/vnd.amazon.eventstream`, so its stream is
+/// re-framed as SSE rather than forwarded verbatim like Anthropic's.
+#[cfg(feature = "server")]
+pub(crate) const BEDROCK_MESSAGES_PROVIDER: &str = "bedrock";
