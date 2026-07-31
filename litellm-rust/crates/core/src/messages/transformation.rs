@@ -1,3 +1,5 @@
+use serde_json::{Map, Value};
+
 use crate::error::CoreResult;
 
 use super::types::{AnthropicMessagesRequest, AnthropicMessagesResponse};
@@ -18,20 +20,18 @@ impl MessagesAuthStrategy {
 }
 
 pub trait AnthropicMessagesProviderConfig: Sync {
+    /// `optional_params` and `stream` mirror Python's
+    /// `BaseAnthropicMessagesConfig.get_complete_url`: Bedrock reads per-request
+    /// AWS routing keys out of the former and picks its path suffix from the
+    /// latter. Anthropic and Azure ignore both.
     fn complete_url(
         &self,
         api_base: Option<&str>,
         model: &str,
+        optional_params: &Map<String, Value>,
+        stream: bool,
         env_lookup: &dyn Fn(&str) -> Option<String>,
     ) -> CoreResult<String>;
-
-    fn signing_region(
-        &self,
-        _api_base: Option<&str>,
-        _env_lookup: &dyn Fn(&str) -> Option<String>,
-    ) -> Option<String> {
-        None
-    }
 
     fn resolve_api_key(
         &self,
@@ -45,6 +45,13 @@ pub trait AnthropicMessagesProviderConfig: Sync {
 
     fn accepts_bearer_auth(&self) -> bool {
         false
+    }
+
+    /// Inbound headers to drop before calling the provider. A gateway forwards
+    /// most client headers verbatim, but Anthropic-specific auth and versioning
+    /// are meaningless to a non-Anthropic upstream and Python never sends them.
+    fn stripped_request_headers(&self) -> &'static [&'static str] {
+        &[]
     }
 
     fn default_headers(&self) -> &'static [(&'static str, &'static str)] {

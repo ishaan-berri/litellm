@@ -33,7 +33,15 @@ pub(super) fn prepare_messages_call(
         .ok_or_else(|| CoreError::InvalidProvider(provider.to_string()))?;
     let env_lookup = |key: &str| std::env::var(key).ok();
 
-    let mut headers = string_headers(request.extra_headers)?;
+    let stripped = config.stripped_request_headers();
+    let mut headers: Vec<(String, String)> = string_headers(request.extra_headers)?
+        .into_iter()
+        .filter(|(name, _)| {
+            !stripped
+                .iter()
+                .any(|excluded| name.eq_ignore_ascii_case(excluded))
+        })
+        .collect();
 
     let auth_strategy = config.auth_strategy();
     let already_authorized = has_header(&headers, auth_strategy.header_name())
@@ -58,7 +66,13 @@ pub(super) fn prepare_messages_call(
         headers.push(("content-type".to_string(), "application/json".to_string()));
     }
 
-    let url = config.complete_url(request.api_base, &model, &env_lookup)?;
+    let url = config.complete_url(
+        request.api_base,
+        &model,
+        &request.optional_params,
+        request.stream,
+        &env_lookup,
+    )?;
     let typed_request = serde_json::from_value(request.body).map_err(|err| {
         CoreError::InvalidRequest(format!("invalid Anthropic messages request: {err}"))
     })?;

@@ -45,6 +45,7 @@ pub async fn run(
             Value::String(upstream_model.to_string()),
         );
 
+    let stream = body.get("stream").and_then(Value::as_bool) == Some(true);
     let request = MessagesRequest {
         model: provider_model,
         body,
@@ -52,11 +53,15 @@ pub async fn run(
         api_base: deployment.litellm_params.api_base.as_deref(),
         custom_llm_provider,
         extra_headers,
+        // TODO: `LiteLLMParams` carries no per-deployment AWS routing keys, so a
+        // Bedrock deployment can only resolve its region from the environment.
+        optional_params: Map::new(),
+        stream,
         timeout: None,
         litellm_call_id: None,
         logging_sink,
     };
-    if request.body.get("stream").and_then(Value::as_bool) == Some(true) {
+    if stream {
         return messages_stream(request).await.map(MessagesResponse::Stream);
     }
 

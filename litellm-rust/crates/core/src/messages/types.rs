@@ -14,6 +14,12 @@ pub struct MessagesRequest<'a> {
     pub api_base: Option<&'a str>,
     pub custom_llm_provider: Option<&'a str>,
     pub extra_headers: Option<Map<String, Value>>,
+    /// LiteLLM control params (not request-body fields) that providers read when
+    /// resolving a URL, mirroring what Python hands `get_complete_url`.
+    pub optional_params: Map<String, Value>,
+    /// Supplied by the host rather than read off `body`, because Python's
+    /// `get_complete_url` likewise takes it from the caller.
+    pub stream: bool,
     pub timeout: Option<Duration>,
     pub litellm_call_id: Option<&'a str>,
     pub logging_sink: Option<Arc<dyn LogSink>>,

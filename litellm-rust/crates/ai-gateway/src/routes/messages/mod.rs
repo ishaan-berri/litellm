@@ -2,7 +2,6 @@
 
 mod service;
 
-use aws_smithy_eventstream::frame::MessageFrameDecoder;
 use axum::Router;
 use axum::body::Body;
 use axum::extract::{Json, State};
@@ -10,11 +9,10 @@ use axum::http::StatusCode;
 use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE, HeaderMap, HeaderValue};
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
-use bytes::Bytes;
 use futures_util::StreamExt;
-use futures_util::stream::{self, BoxStream};
 use litellm_core::CoreError;
 use litellm_core::logging::stream::count_forwarded_stream;
+use litellm_core::providers::bedrock::messages::stream::bedrock_sse_stream;
 use serde_json::{Map, Value};
 
 use crate::auth::RequireMasterKey;
@@ -88,57 +86,6 @@ fn stream_response(
             "failed to build streaming response: {error}"
         )))
     })
-}
-
-#[allow(dead_code)]
-struct EventStreamState {
-    upstream: BoxStream<'static, Result<Bytes, reqwest::Error>>,
-    buffer: bytes::BytesMut,
-    decoder: MessageFrameDecoder,
-    terminated: bool,
-}
-
-fn bedrock_sse_stream(
-    upstream: BoxStream<'static, Result<Bytes, reqwest::Error>>,
-) -> BoxStream<'static, Result<Bytes, std::io::Error>> {
-    stream::unfold(
-        EventStreamState {
-            upstream,
-            buffer: bytes::BytesMut::new(),
-            decoder: MessageFrameDecoder::new(),
-            terminated: false,
-        },
-        |_state| async move {
-            todo!("decode Bedrock EventStream frames and emit normalized Anthropic SSE")
-        },
-    )
-    .boxed()
-}
-
-#[allow(dead_code)]
-fn sse_data(payload: &[u8]) -> String {
-    let value = serde_json::from_slice::<serde_json::Value>(payload)
-        .ok()
-        .and_then(|value| value.get("bytes").and_then(serde_json::Value::as_str).map(str::to_string))
-        .and_then(|encoded| {
-            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, encoded).ok()
-        })
-        .and_then(|payload| serde_json::from_slice::<serde_json::Value>(&payload).ok())
-        .unwrap_or_else(|| serde_json::json!({"type": "error", "error": {"type": "invalid_request_error", "message": "invalid Bedrock event"}}));
-    let event = value
-        .get("type")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("message");
-    format!("event: {event}\ndata: {value}\n\n")
-}
-
-#[allow(dead_code)]
-fn sse_error(payload: &[u8]) -> String {
-    let message = String::from_utf8_lossy(payload);
-    format!(
-        "event: error\ndata: {}\n\n",
-        serde_json::json!({"type": "error", "error": {"type": "api_error", "message": message}})
-    )
 }
 
 fn forwarded_headers(headers: &HeaderMap) -> Result<Option<Map<String, Value>>, CoreError> {
@@ -265,6 +212,7 @@ mod tests {
             master_key: master_key.map(Arc::from),
             loggers: Arc::new(Vec::new()),
             realtime_pool: RealtimePool::disabled(),
+            logging_sink: None,
         }
     }
 
