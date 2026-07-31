@@ -33,7 +33,15 @@ pub(super) fn prepare_messages_call(
         .ok_or_else(|| CoreError::InvalidProvider(provider.to_string()))?;
     let env_lookup = |key: &str| std::env::var(key).ok();
 
-    let mut headers = string_headers(request.extra_headers)?;
+    let stripped = config.stripped_request_headers();
+    let mut headers: Vec<(String, String)> = string_headers(request.extra_headers)?
+        .into_iter()
+        .filter(|(name, _)| {
+            !stripped
+                .iter()
+                .any(|excluded| name.eq_ignore_ascii_case(excluded))
+        })
+        .collect();
 
     let auth_strategy = config.auth_strategy();
     let already_authorized = has_header(&headers, auth_strategy.header_name())

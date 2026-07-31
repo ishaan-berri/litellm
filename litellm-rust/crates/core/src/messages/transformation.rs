@@ -47,6 +47,13 @@ pub trait AnthropicMessagesProviderConfig: Sync {
         false
     }
 
+    /// Inbound headers to drop before calling the provider. A gateway forwards
+    /// most client headers verbatim, but Anthropic-specific auth and versioning
+    /// are meaningless to a non-Anthropic upstream and Python never sends them.
+    fn stripped_request_headers(&self) -> &'static [&'static str] {
+        &[]
+    }
+
     fn default_headers(&self) -> &'static [(&'static str, &'static str)] {
         &[
             ("anthropic-version", "2023-06-01"),

@@ -151,6 +151,13 @@ impl AnthropicMessagesProviderConfig for BedrockMessagesConfig {
         &[]
     }
 
+    /// A gateway forwards client headers verbatim, and Claude Code always sends
+    /// these two. Bedrock authenticates with a bearer token and versions through
+    /// `anthropic_version` in the body, so both are noise upstream.
+    fn stripped_request_headers(&self) -> &'static [&'static str] {
+        &["x-api-key", "anthropic-version"]
+    }
+
     fn transform_request(
         &self,
         request: AnthropicMessagesRequest,
